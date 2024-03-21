@@ -1,0 +1,6 @@
+pandas
+h5py
+xmltodict
+tqdm
+pyyaml
+git+https://github.com/khammernik/medutils.git@master

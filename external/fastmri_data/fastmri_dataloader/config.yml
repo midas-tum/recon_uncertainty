@@ -1,0 +1,32 @@
+BaseExperiment: &defaults
+    seed: 42
+    root_dir: !ENV ${FASTMRI_ROOT}
+    batch_size: 8
+    singlecoil_train_ds:
+        csv_file: ./datasets/fastmri_singlecoil_knee_train.csv
+        full: True
+        slices:
+            min: 8
+        patch:
+            patch_ny: 96
+            offset_y: 0
+            remove_feos: True
+    singlecoil_val_ds:
+        csv_file: ./datasets/fastmri_singlecoil_knee_val.csv
+        full: True
+        slices:
+            min: 12
+            max: 25
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    singlecoil_test_ds:
+        csv_file: ./datasets/fastmri_singlecoil_knee_val.csv
+    data_filter:
+        acquisition:
+            - CORPD_FBK
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08

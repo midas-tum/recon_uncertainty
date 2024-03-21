@@ -1,0 +1,877 @@
+model: &model
+    S: 10
+    dynamic: False
+    parameter_estimation: False
+    R_config: &R_config
+        dim: '2D'
+        n_channels: !!python/tuple [ 2,2 ]
+        activation: 'relu'
+        kernel_size: !!python/tuple [ 3,3 ]
+        pool_size: !!python/tuple [ 2,2 ]
+        filters: 64
+        num_layer_per_block: 5
+        normalization: 'bn'
+        padding: 'same'
+    D_type: 'none'
+    D_config:
+        weight_init: 0.1
+        weight_scale: 10.0
+        trainable: False
+    A_config:
+        center: False
+    lambda:
+        train_scale: 1
+    tau: &tau
+        trainable: False
+        init: 1.0
+        scale: 1.0
+        min: 0.0001
+        max: 1000
+
+BaseExperiment: &defaults
+    # global data vars
+    #__data_root__: /mnt/data/datasets/fastMRI
+    #__data_root__: /mnt/qdata/rawdata/fastMRI
+    __data_root__: /scratch/fastMRI
+    __exp_dir_base__: './exp_dir_base'
+    __result_dir_base__: '__exp_dir_base__/results'
+    __R__: &R 4
+    __fold__: 1
+    plot_interval: 100
+    max_epochs: 200
+    predict: False
+    wandb_offline: False
+    wandb_tags: ['modl']
+    # define files and dirs
+    root_dir: __data_root__
+    exp_dir: '__exp_dir_base__/exps/fold__fold__/R__R__'
+    result_dir: '__result_dir_base__/fold__fold__/R__R__'
+    data_filter:
+        acquisition:
+            - CORPD_FBK
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+    # global
+    seed: 42
+    device: 'cuda'
+    num_workers: 4  # set to 0 for debugging, otherwise Python debugger freezes
+    ood: None   # OOD data
+    # dataset
+    multicoil: False
+    singlecoil_train_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/singlecoil_knee_train_filtered.csv
+        full: True
+        slices:
+            min: 8
+        patch:
+            patch_ny: 96
+            offset_y: 0
+            remove_feos: True
+    singlecoil_val_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/singlecoil_knee_val_filtered.csv
+        full: True
+        slices:
+            min: 12
+            max: 25
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    singlecoil_test_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/singlecoil_knee_fastmriplus.csv
+        full: True
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    ref_max: 1
+    # training
+    crop_size:
+    fastmri_ds_batch_size: 1
+    batch_size: 8
+    log_interval: 100
+    # optimizer
+    num_epochs: 30
+    optim: 'adam'
+    lr: !!float 1e-3
+    lr_schedule: false
+    # loss
+    loss: 'loss_abs_mse'
+    # model
+    model: *model
+
+BaseExperimentMulticoil: &defaultsMulticoil
+    <<: *defaults
+    multicoil: True
+    multicoil_train_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/fastmri_multicoil_knee_train.csv
+        full: True
+        slices:
+            min: 8
+        patch:
+            patch_nx: 368
+            patch_ny: 96
+            offset_y: 0
+            remove_feos: True
+    multicoil_val_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/fastmri_multicoil_knee_val.csv
+        full: True
+        slices:
+            min: 12
+            max: 25
+        patch:
+            patch_nx: 368
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    multicoil_test_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/fastmri_multicoil_knee_test.csv
+        full: True
+        patch:
+            patch_nx: 368
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+
+modl_real2ch_unrolled: &modl_real2ch
+    <<: *defaults
+    loss: 'loss_complex_mse'
+    optim: adam
+    lr: !!float 1e-3
+    model:
+        <<: *model
+        R_type: real2ch_modl
+        parameter_estimation: False
+        S: 10
+        dynamic: False   # False and S>1: weight sharing denoiser, True and S>1: no weight sharing
+        D_type: 'pm'
+        D_config:
+            weight_init: 0.1
+            weight_scale: 10.0
+            trainable: False
+
+modl_real2ch_unrolled_sigma: &modl_real2ch_sigma
+    <<: *defaults
+    optim: adam
+    lr: !!float 1e-3
+    wandb_tags: [ 'modl_sigma' ]
+    loss: 'loss_l2_heteroscedastic'
+    model:
+        <<: *model
+        R_type: real2ch_modl
+        parameter_estimation: True
+        R_config:
+            <<: *R_config
+            n_channels: !!python/tuple [ 2,4 ]
+        S: 10
+        dynamic: False
+        D_type: 'pm'
+        D_config:
+            weight_init: 0.1
+            weight_scale: 10.0
+            trainable: False
+            
+modl_real2ch_unrolled_ensemble: &modl_real2ch_unrolled_ensemble
+    <<: *modl_real2ch
+    wandb_offline: True
+    num_workers: 4
+    data_filter:
+        acquisition:
+            - CORPD_FBK
+            - CORPDFS_FBK   # OOD data
+        filename:
+            - knee/data/singlecoil_val/file1000000.h5
+            - knee/data/singlecoil_val/file1000007.h5
+            - knee/data/singlecoil_val/file1000026.h5
+            - knee/data/singlecoil_val/file1000031.h5
+            - knee/data/singlecoil_val/file1000041.h5
+            - knee/data/singlecoil_val/file1000071.h5
+            - knee/data/singlecoil_val/file1000229.h5
+            - knee/data/singlecoil_val/file1000243.h5
+            - knee/data/singlecoil_val/file1000263.h5
+    predict: True
+    batch_size: 1
+    ood: None   # OOD data
+    annotation_path: ~/Projects/ensemble/external/fastmri-plus/Annotations/knee.csv
+    # plot subjects
+    selected_subjects: file1000000, file1000007, file1000026, file1000031, file1000041, file1000071, file1000229, file1000243, file1000263
+    selected_slices: 5, 10, 15, 20, 25, 30  # in addition to the annoted slices
+    ckpts:
+
+modl_real2ch_unrolled_ensemble_acc4:
+    <<: *modl_real2ch_unrolled_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_ensemble_acc8:
+    <<: *modl_real2ch_unrolled_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_eX_acc8'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_ensemble_acc4_center_low:
+    <<: *modl_real2ch_unrolled_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_eX_acc4_center_low'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_ensemble_acc4_center_high:
+    <<: *modl_real2ch_unrolled_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_eX_acc4_center_high'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_sigma_ensemble: &modl_real2ch_unrolled_sigma_ensemble
+    <<: *modl_real2ch_sigma
+    wandb_offline: True
+    num_workers: 4
+    data_filter:
+        acquisition:
+            - CORPD_FBK
+            - CORPDFS_FBK   # OOD data
+        filename:
+            - knee/data/singlecoil_val/file1000000.h5
+            - knee/data/singlecoil_val/file1000007.h5
+            - knee/data/singlecoil_val/file1000026.h5
+            - knee/data/singlecoil_val/file1000031.h5
+            - knee/data/singlecoil_val/file1000041.h5
+            - knee/data/singlecoil_val/file1000071.h5
+            - knee/data/singlecoil_val/file1000229.h5
+            - knee/data/singlecoil_val/file1000243.h5
+            - knee/data/singlecoil_val/file1000263.h5
+    predict: True
+    batch_size: 1
+    ood: None   # OOD data
+    annotation_path: ~/Projects/ensemble/external/fastmri-plus/Annotations/knee.csv
+    # plot subjects
+    selected_subjects: file1000000, file1000007, file1000026, file1000031, file1000041, file1000071, file1000229, file1000243, file1000263
+    selected_slices: 5, 10, 15, 20, 25, 30  # in addition to the annoted slices
+
+modl_real2ch_unrolled_sigma_ensemble_acc4:
+    <<: *modl_real2ch_unrolled_sigma_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_sigma_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_ensemble_acc8:
+    <<: *modl_real2ch_unrolled_sigma_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_sigma_eX_acc8'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_ensemble_acc4_center_low:
+    <<: *modl_real2ch_unrolled_sigma_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_sigma_eX_acc4_center_low'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_sigma_ensemble_acc4_center_high:
+    <<: *modl_real2ch_unrolled_sigma_ensemble
+    ckpt_name: 'modl_real2ch_unrolled_sigma_eX_acc4_center_high'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_sigma_e0_acc4:
+    <<: *modl_real2ch_sigma
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e1_acc4:
+    <<: *modl_real2ch_sigma
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e2_acc4:
+    <<: *modl_real2ch_sigma
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e3_acc4:
+    <<: *modl_real2ch_sigma
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e4_acc4:
+    <<: *modl_real2ch_sigma
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e0_acc8:
+    <<: *modl_real2ch_sigma
+    seed: 42
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e1_acc8:
+    <<: *modl_real2ch_sigma
+    seed: 43
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e2_acc8:
+    <<: *modl_real2ch_sigma
+    seed: 44
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e3_acc8:
+    <<: *modl_real2ch_sigma
+    seed: 45
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e4_acc8:
+    <<: *modl_real2ch_sigma
+    seed: 46
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_sigma_e0_acc4_center_low:
+    <<: *modl_real2ch_sigma
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_sigma_e1_acc4_center_low:
+    <<: *modl_real2ch_sigma
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_sigma_e2_acc4_center_low:
+    <<: *modl_real2ch_sigma
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_sigma_e3_acc4_center_low:
+    <<: *modl_real2ch_sigma
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_sigma_e4_acc4_center_low:
+    <<: *modl_real2ch_sigma
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_sigma_e0_acc4_center_high:
+    <<: *modl_real2ch_sigma
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_sigma_e1_acc4_center_high:
+    <<: *modl_real2ch_sigma
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_sigma_e2_acc4_center_high:
+    <<: *modl_real2ch_sigma
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_sigma_e3_acc4_center_high:
+    <<: *modl_real2ch_sigma
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_sigma_e4_acc4_center_high:
+    <<: *modl_real2ch_sigma
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_e0_acc4:
+    <<: *modl_real2ch
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e1_acc4:
+    <<: *modl_real2ch
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e2_acc4:
+    <<: *modl_real2ch
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e3_acc4:
+    <<: *modl_real2ch
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e4_acc4:
+    <<: *modl_real2ch
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e5_acc4:
+    <<: *modl_real2ch
+    seed: 47
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e6_acc4:
+    <<: *modl_real2ch
+    seed: 48
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e7_acc4:
+    <<: *modl_real2ch
+    seed: 49
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e8_acc4:
+    <<: *modl_real2ch
+    seed: 50
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e9_acc4:
+    <<: *modl_real2ch
+    seed: 51
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e10_acc4:
+    <<: *modl_real2ch
+    seed: 52
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e11_acc4:
+    <<: *modl_real2ch
+    seed: 53
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e12_acc4:
+    <<: *modl_real2ch
+    seed: 54
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e13_acc4:
+    <<: *modl_real2ch
+    seed: 54
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e14_acc4:
+    <<: *modl_real2ch
+    seed: 55
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e15_acc4:
+    <<: *modl_real2ch
+    seed: 56
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e16_acc4:
+    <<: *modl_real2ch
+    seed: 57
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e17_acc4:
+    <<: *modl_real2ch
+    seed: 58
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e18_acc4:
+    <<: *modl_real2ch
+    seed: 59
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e19_acc4:
+    <<: *modl_real2ch
+    seed: 60
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e0_acc8:
+    <<: *modl_real2ch
+    seed: 42
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e1_acc8:
+    <<: *modl_real2ch
+    seed: 43
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e2_acc8:
+    <<: *modl_real2ch
+    seed: 44
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e3_acc8:
+    <<: *modl_real2ch
+    seed: 45
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+modl_real2ch_unrolled_e4_acc8:
+    <<: *modl_real2ch
+    seed: 46
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e5_acc8:
+    <<: *modl_real2ch
+    seed: 47
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e6_acc8:
+    <<: *modl_real2ch
+    seed: 48
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e7_acc8:
+    <<: *modl_real2ch
+    seed: 49
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e8_acc8:
+    <<: *modl_real2ch
+    seed: 50
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e9_acc8:
+    <<: *modl_real2ch
+    seed: 51
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e10_acc8:
+    <<: *modl_real2ch
+    seed: 52
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e11_acc8:
+    <<: *modl_real2ch
+    seed: 53
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e12_acc8:
+    <<: *modl_real2ch
+    seed: 54
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e13_acc8:
+    <<: *modl_real2ch
+    seed: 55
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e14_acc8:
+    <<: *modl_real2ch
+    seed: 56
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e15_acc8:
+    <<: *modl_real2ch
+    seed: 57
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e16_acc8:
+    <<: *modl_real2ch
+    seed: 58
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e17_acc8:
+    <<: *modl_real2ch
+    seed: 59
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e18_acc8:
+    <<: *modl_real2ch
+    seed: 60
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e19_acc8:
+    <<: *modl_real2ch
+    seed: 61
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+modl_real2ch_unrolled_e0_acc4_center_low:
+    <<: *modl_real2ch
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_e1_acc4_center_low:
+    <<: *modl_real2ch
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_e2_acc4_center_low:
+    <<: *modl_real2ch
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_e3_acc4_center_low:
+    <<: *modl_real2ch
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_e4_acc4_center_low:
+    <<: *modl_real2ch
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+modl_real2ch_unrolled_e0_acc4_center_high:
+    <<: *modl_real2ch
+    lr: !!float 1e-4
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_e1_acc4_center_high:
+    <<: *modl_real2ch
+    lr: !!float 1e-4
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_e2_acc4_center_high:
+    <<: *modl_real2ch
+    lr: !!float 1e-4
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_e3_acc4_center_high:
+    <<: *modl_real2ch
+    lr: !!float 1e-4
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_e4_acc4_center_high:
+    <<: *modl_real2ch
+    lr: !!float 1e-4
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+modl_real2ch_unrolled_multicoil_e0_acc4:
+    <<: *defaultsMulticoil
+    model:
+        <<: *model
+        A_config:
+            center: False
+            channel_dim_defined: False
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08

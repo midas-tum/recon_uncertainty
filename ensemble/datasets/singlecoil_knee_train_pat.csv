@@ -1,0 +1,1 @@
+filename,acquisition,systemVendor,systemModel,systemFieldStrength_T,receiverChannels,institutionName,enc_x,enc_y,enc_z,rec_x,rec_y,rec_z,enc_x_mm,enc_y_mm,enc_z_mm,rec_x_mm,rec_y_mm,rec_z_mm,nPE,acc,num_low_freq,TR,TE,TI,flipAngle_deg,sequence_type,echo_spacing,file,slice,study_level,x,y,width,height,label,_merge

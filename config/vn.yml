@@ -1,0 +1,976 @@
+model: &model
+    S: 10
+    R_type: foe
+    dynamic: True  # True: no shared params/weights
+    parameter_estimation: False
+    D_type: pm
+    R_config:
+        dim: 2D
+        K1:
+            in_channels: 2
+            filters: 48
+            kernel_size: 11
+            bound_norm: True
+            zero_mean: True
+        f1:
+            num_channels: 48
+            vmin: -1.0
+            vmax: 1.0  # 0.8 / 1.0 -> depends on noise level
+            num_weights: 63  # 31 / 63
+            base_type: linear
+            init: linear
+            init_scale: 0.05
+        f1_abs:
+            num_channels: 48
+            vmin: 0.0
+            vmax: 1.0
+            num_weights: 63
+            base_type: linear
+            init: linear
+            init_scale: 0.05
+    A_config:
+        center: False
+    D_config:
+        weight_init: 0.1 # 100
+        weight_scale: 1.0
+        trainable: true
+    tau: &tau
+        trainable: False
+        init: 1.0
+        scale: 1.0
+        min: 0.0001
+        max: 1000
+    lambda: &lambda
+        init: 1
+        min: 0.001
+        max: 1000
+        requires_grad: True  # If set, the parameters for the data term will be learnt
+
+BaseExperiment: &defaults
+    # global data vars
+    #__data_root__: /mnt/data/datasets/fastMRI
+    #__data_root__: /mnt/qdata/rawdata/fastMRI
+    __data_root__: /scratch/fastMRI
+    __exp_dir_base__: './exp_dir_base'
+    __result_dir_base__: '__exp_dir_base__/results'
+    __R__: &R 4
+    __fold__: 1
+    plot_interval: 100
+    max_epochs: 200
+    predict: False
+    wandb_offline: false
+    wandb_tags: ['vn']
+    # define files and dirs
+    root_dir: __data_root__
+    exp_dir: '__exp_dir_base__/exps/fold__fold__/R__R__'
+    result_dir: '__result_dir_base__/fold__fold__/R__R__'
+    data_filter:
+        acquisition:
+            - CORPD_FBK
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+    # global
+    seed: 42
+    device: 'cuda'
+    num_workers: 4  # set to 0 for debugging, otherwise Python debugger freezes
+    ood: None   # OOD data
+    # dataset
+    multicoil: False
+    singlecoil_train_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/singlecoil_knee_train_filtered.csv
+        full: True
+        slices:
+            min: 8
+        patch:
+            patch_ny: 96
+            offset_y: 0
+            remove_feos: True
+    singlecoil_val_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/singlecoil_knee_val_filtered.csv
+        full: True
+        slices:
+            min: 12
+            max: 25
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    singlecoil_test_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/singlecoil_knee_fastmriplus.csv
+        full: True
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    multicoil_test_knee_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/knee_nyu_ood.csv
+        full: True
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    multicoil_test_brain_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/multicoil_brain_val.csv
+        full: True
+        patch:
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    ref_max: 1
+    # training
+    crop_size:
+    fastmri_ds_batch_size: 1
+    batch_size: 8
+    log_interval: 100
+    grad_acc: 1
+    # optimizer
+    num_epochs: 30
+    optim: 'blockadam'
+    lr: !!float 1e-3
+    lr_scheduler: True
+    lr_step_size: 15
+    lr_gamma: 0.5
+    weight_decay: 0
+    # loss
+    #loss: 'loss_vn'
+    loss: 'loss_complex_mse'
+    # model
+    model: *model
+
+BaseExperimentMulticoil: &defaultsMulticoil
+    <<: *defaults
+    multicoil: True
+    multicoil_train_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/fastmri_multicoil_knee_train.csv
+        full: True
+        slices:
+            min: 8
+        patch:
+            patch_nx: 368
+            patch_ny: 96
+            offset_y: 0
+            remove_feos: True
+    multicoil_val_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/fastmri_multicoil_knee_val.csv
+        full: True
+        slices:
+            min: 12
+            max: 25
+        patch:
+            patch_nx: 368
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+    multicoil_test_ds:
+        csv_file: ~/Projects/ensemble/ensemble/datasets/fastmri_multicoil_knee_test.csv
+        full: True
+        patch:
+            patch_nx: 368
+            patch_ny: 320
+            offset_y: 0
+            remove_feos: True
+
+vn_foe: &vn_foe
+    <<: *defaults
+    wandb_tags: ['vn']
+    model:
+        <<: *model
+
+vn_foe_ensemble: &vn_foe_ensemble
+    <<: *vn_foe
+    #__data_root__: /mnt/qdata/rawdata/fastMRI
+    wandb_offline: True
+    num_workers: 4
+    data_filter:
+        acquisition:
+            - CORPD_FBK
+            - CORPDFS_FBK   # OOD data
+        filename:
+            - knee/data/singlecoil_val/file1000000.h5
+            - knee/data/singlecoil_val/file1000007.h5
+            - knee/data/singlecoil_val/file1000026.h5
+            - knee/data/singlecoil_val/file1000031.h5
+            - knee/data/singlecoil_val/file1000041.h5
+            - knee/data/singlecoil_val/file1000071.h5
+            - knee/data/singlecoil_val/file1000229.h5
+            - knee/data/singlecoil_val/file1000243.h5
+            - knee/data/singlecoil_val/file1000263.h5
+    predict: True
+    batch_size: 1
+    ood: None   # OOD data
+    annotation_path: /home/studwangl1/home/studwangl1/new/external/fastmri-plus/Annotations/knee.csv
+    # plot subjects
+    selected_subjects: file1000000, file1000007, file1000026, file1000031, file1000041, file1000071, file1000229, file1000243, file1000263
+    selected_slices: 5, 10, 15, 20, 25, 30  # in addition to the annoted slices
+    ckpts:
+
+vn_foe_ensemble_acc4:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble_acc8:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc8'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc4:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc8:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc8'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc4_8:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4_8'
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+
+vn_foe_ensemble_acc4_center_low:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4_center_low'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_ensemble_acc4_center_high:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4_center_high'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_ensemble_acc4_acc8test:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble_acc8_acc4test:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc8'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc4_acc8test:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc8_acc4test:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc8'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc4_8_acc8test:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4_8'
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble20_acc4_8_acc4test:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4_8'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_ensemble_acc4_lowtest:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_ensemble_acc4_hightest:
+    <<: *vn_foe_ensemble
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_ensemble_acc4_brainacc4: &vn_foe_ensemble_acc4_brainacc4
+    <<: *vn_foe_ensemble
+    __data_root__: /mnt/qdata/rawdata/fastMRI/brain/
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+    data_filter:
+        acquisition:
+            - AXFLAIR
+            - AXT1POST
+            - AXT1
+            - AXT2
+        filename:
+            - multicoil_val/file_brain_AXFLAIR_200_6002477.h5
+            - multicoil_val/file_brain_AXT1POST_200_6001976.h5
+            - multicoil_val/file_brain_AXT1PRE_200_6002079.h5
+            - multicoil_val/file_brain_AXT1_201_6002725.h5
+    predict: True
+    batch_size: 1
+    num_workers: 0
+    ood: brain   # OOD data
+    annotation_path: ~/Projects/ensemble/external/fastmri-plus/Annotations/brain.csv
+    # plot subjects
+    selected_subjects: file_brain_AXFLAIR_200_6002477, file_brain_AXT1POST_200_6001976, file_brain_AXT1PRE_200_6002079, file_brain_AXT1_201_6002725
+
+vn_foe_ensemble20_acc4_brainacc4:
+    <<: *vn_foe_ensemble_acc4_brainacc4
+
+vn_foe_ensemble_acc4_kneenyuacc4: &vn_foe_ensemble_acc4_kneenyuacc4
+    <<: *vn_foe_ensemble
+    __data_root__: /mnt/qdata/rawdata/fastMRI/knee_nyu
+    ckpt_name: 'vn_foe_eX_acc4'
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+    data_filter:
+        acquisition:
+            - sagittal_pd
+            - sagittal_t2
+            - axial_t2
+        filename:
+            - sagittal_pd/kneenyu_0001.h5
+            - sagittal_t2/kneenyu_0001.h5
+            - axial_t2/kneenyu_0001.h5
+    predict: True
+    batch_size: 1
+    num_workers: 8
+    ood: knee   # OOD data
+    annotation_path: ''
+    # plot subjects
+    selected_subjects: sagittal_pd_kneenyu_0001, sagittal_t2_kneenyu_0001, axial_t2_kneenyu_0001
+
+vn_foe_ensemble20_acc4_kneenyuacc4:
+    <<: *vn_foe_ensemble_acc4_kneenyuacc4
+
+vn_foe_e0_acc4_center_low:
+    <<: *vn_foe
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_e1_acc4_center_low:
+    <<: *vn_foe
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_e2_acc4_center_low:
+    <<: *vn_foe
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_e3_acc4_center_low:
+    <<: *vn_foe
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_e4_acc4_center_low:
+    <<: *vn_foe
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.04
+
+vn_foe_e0_acc4_center_high:
+    <<: *vn_foe
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_e1_acc4_center_high:
+    <<: *vn_foe
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_e2_acc4_center_high:
+    <<: *vn_foe
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_e3_acc4_center_high:
+    <<: *vn_foe
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_e4_acc4_center_high:
+    <<: *vn_foe
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.16
+
+vn_foe_e0_acc4:
+    <<: *vn_foe
+    seed: 42
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e1_acc4:
+    <<: *vn_foe
+    seed: 43
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e2_acc4:
+    <<: *vn_foe
+    seed: 44
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e3_acc4:
+    <<: *vn_foe
+    seed: 45
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e4_acc4:
+    <<: *vn_foe
+    seed: 46
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e5_acc4:
+    <<: *vn_foe
+    seed: 47
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e6_acc4:
+    <<: *vn_foe
+    seed: 48
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e7_acc4:
+    <<: *vn_foe
+    seed: 49
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e8_acc4:
+    <<: *vn_foe
+    seed: 50
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e9_acc4:
+    <<: *vn_foe
+    seed: 51
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e10_acc4:
+    <<: *vn_foe
+    seed: 52
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e11_acc4:
+    <<: *vn_foe
+    seed: 53
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e12_acc4:
+    <<: *vn_foe
+    seed: 54
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e13_acc4:
+    <<: *vn_foe
+    seed: 55
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e14_acc4:
+    <<: *vn_foe
+    seed: 56
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e15_acc4:
+    <<: *vn_foe
+    seed: 57
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e16_acc4:
+    <<: *vn_foe
+    seed: 58
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e17_acc4:
+    <<: *vn_foe
+    seed: 59
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e18_acc4:
+    <<: *vn_foe
+    seed: 60
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e19_acc4:
+    <<: *vn_foe
+    seed: 61
+    accelerations:
+        - 4
+    center_fractions:
+        - 0.08
+
+vn_foe_e0_acc8:
+    <<: *vn_foe
+    seed: 42
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e1_acc8:
+    <<: *vn_foe
+    seed: 43
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e2_acc8:
+    <<: *vn_foe
+    seed: 44
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e3_acc8:
+    <<: *vn_foe
+    seed: 45
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+
+vn_foe_e4_acc8:
+    <<: *vn_foe
+    seed: 46
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e5_acc8:
+    <<: *vn_foe
+    seed: 47
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e6_acc8:
+    <<: *vn_foe
+    seed: 48
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e7_acc8:
+    <<: *vn_foe
+    seed: 49
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e8_acc8:
+    <<: *vn_foe
+    seed: 50
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e9_acc8:
+    <<: *vn_foe
+    seed: 51
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e10_acc8:
+    <<: *vn_foe
+    seed: 52
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e11_acc8:
+    <<: *vn_foe
+    seed: 53
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e12_acc8:
+    <<: *vn_foe
+    seed: 54
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e13_acc8:
+    <<: *vn_foe
+    seed: 55
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e14_acc8:
+    <<: *vn_foe
+    seed: 56
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e15_acc8:
+    <<: *vn_foe
+    seed: 57
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e16_acc8:
+    <<: *vn_foe
+    seed: 58
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e17_acc8:
+    <<: *vn_foe
+    seed: 59
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e18_acc8:
+    <<: *vn_foe
+    seed: 60
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e19_acc8:
+    <<: *vn_foe
+    seed: 61
+    accelerations:
+        - 8
+    center_fractions:
+        - 0.08
+
+vn_foe_e0_acc4_8:
+    <<: *vn_foe
+    seed: 42
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e1_acc4_8:
+    <<: *vn_foe
+    seed: 43
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e2_acc4_8:
+    <<: *vn_foe
+    seed: 44
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e3_acc4_8:
+    <<: *vn_foe
+    seed: 45
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e4_acc4_8:
+    <<: *vn_foe
+    seed: 46
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e5_acc4_8:
+    <<: *vn_foe
+    seed: 47
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e6_acc4_8:
+    <<: *vn_foe
+    seed: 48
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e7_acc4_8:
+    <<: *vn_foe
+    seed: 49
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e8_acc4_8:
+    <<: *vn_foe
+    seed: 50
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e9_acc4_8:
+    <<: *vn_foe
+    seed: 51
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e10_acc4_8:
+    <<: *vn_foe
+    seed: 52
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e11_acc4_8:
+    <<: *vn_foe
+    seed: 53
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e12_acc4_8:
+    <<: *vn_foe
+    seed: 54
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e13_acc4_8:
+    <<: *vn_foe
+    seed: 55
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e14_acc4_8:
+    <<: *vn_foe
+    seed: 56
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e15_acc4_8:
+    <<: *vn_foe
+    seed: 57
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e16_acc4_8:
+    <<: *vn_foe
+    seed: 58
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e17_acc4_8:
+    <<: *vn_foe
+    seed: 59
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e18_acc4_8:
+    <<: *vn_foe
+    seed: 60
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
+vn_foe_e19_acc4_8:
+    <<: *vn_foe
+    seed: 61
+    accelerations:
+        - 4
+        - 8
+    center_fractions:
+        - 0.08
+        - 0.08
